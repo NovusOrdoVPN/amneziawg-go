@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  *
- * Copyright (C) 2025 NovusOrdo. All Rights Reserved.
+ * Copyright (C) 2017-2023 WireGuard LLC. All Rights Reserved.
  */
 
 package device
@@ -29,7 +29,7 @@ const (
 	// AuthSeedSize is the size of the shared seed (32 bytes).
 	AuthSeedSize = 32
 
-	hkdfSalt = "novusordo-awg-v1"
+	hkdfSalt = "awg-auth-kdf-v1"
 	hkdfInfo = "wg-private-key"
 )
 
@@ -87,7 +87,7 @@ func DeriveKeypairFromUUID(seed [AuthSeedSize]byte, uuid [UUIDBinarySize]byte) (
 // encryptionKeyFromSeed derives the XChaCha20-Poly1305 key used to encrypt/decrypt
 // the auth payload in the handshake padding.
 func encryptionKeyFromSeed(seed [AuthSeedSize]byte) [32]byte {
-	return sha256.Sum256(append([]byte("novusordo-awg-auth-"), seed[:]...))
+	return sha256.Sum256(append([]byte("awg-auth-enc-v1-"), seed[:]...))
 }
 
 // EncryptAuthPayload encrypts a UUID into an auth payload suitable for embedding
