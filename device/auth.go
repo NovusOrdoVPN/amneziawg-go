@@ -192,10 +192,12 @@ func UUIDFromString(s string) ([UUIDBinarySize]byte, error) {
 }
 
 // TunnelIPFromUUID derives a unique /32 tunnel IP from a UUID.
+// Uses SHA-256 of the full UUID to ensure uniform distribution even when
+// UUIDs share a common prefix (hybrid UUIDs share the first 12 bytes).
 // Returns an IP in the 10.128-255.X.X range to avoid conflicts with static peers.
-// The IP is deterministic: same UUID always produces the same IP.
 func TunnelIPFromUUID(uuid [UUIDBinarySize]byte) [4]byte {
-	return [4]byte{10, uuid[0] | 0x80, uuid[1], uuid[2]}
+	h := sha256.Sum256(uuid[:])
+	return [4]byte{10, h[0] | 0x80, h[1], h[2]}
 }
 
 func hexVal(c byte) (byte, bool) {
