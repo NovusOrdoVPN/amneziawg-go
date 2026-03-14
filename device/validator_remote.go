@@ -40,11 +40,6 @@ type cachedDecision struct {
 type inflightCall struct {
 	wg      sync.WaitGroup
 	allowed bool
-	err     error
-
-	decisionTTL time.Duration
-	heartbeat   time.Duration
-	denyTTL     time.Duration
 }
 
 type towerRequest struct {

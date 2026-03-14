@@ -170,16 +170,14 @@ func (device *Device) RoutineReceiveIncoming(
 						device.log.Errorf("Auth: failed to create peer for UUID %s: %v", UUIDToString(uuid), err)
 						continue
 					}
-					// Allow all traffic from this peer through the tunnel
-					allIPv4, _ := netip.ParsePrefix("0.0.0.0/0")
-					allIPv6, _ := netip.ParsePrefix("::/0")
-					device.allowedips.Insert(allIPv4, peer)
-					device.allowedips.Insert(allIPv6, peer)
+					// Assign a unique /32 tunnel IP derived from UUID to avoid AllowedIPs conflicts.
+					tunnelIP := netip.AddrFrom4(TunnelIPFromUUID(uuid))
+					device.allowedips.Insert(netip.PrefixFrom(tunnelIP, 32), peer)
 
 					if device.isUp() {
 						peer.Start()
 					}
-					device.log.Verbosef("Auth: created dynamic peer for UUID %s", UUIDToString(uuid))
+					device.log.Verbosef("Auth: created dynamic peer for UUID %s (tunnel IP %s)", UUIDToString(uuid), tunnelIP)
 				}
 			}
 

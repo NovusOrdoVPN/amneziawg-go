@@ -191,6 +191,13 @@ func UUIDFromString(s string) ([UUIDBinarySize]byte, error) {
 	return uuid, nil
 }
 
+// TunnelIPFromUUID derives a unique /32 tunnel IP from a UUID.
+// Returns an IP in the 10.128-255.X.X range to avoid conflicts with static peers.
+// The IP is deterministic: same UUID always produces the same IP.
+func TunnelIPFromUUID(uuid [UUIDBinarySize]byte) [4]byte {
+	return [4]byte{10, uuid[0] | 0x80, uuid[1], uuid[2]}
+}
+
 func hexVal(c byte) (byte, bool) {
 	switch {
 	case c >= '0' && c <= '9':
