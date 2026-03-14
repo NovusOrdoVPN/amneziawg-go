@@ -161,6 +161,15 @@ func (peer *Peer) SendHandshakeInitiation(isRetry bool) error {
 	if padding := peer.device.paddings.init; padding > 0 {
 		buf := make([]byte, padding+len(packet))
 		rand.Read(buf[:padding])
+
+		// If auth is configured, embed encrypted UUID in the first bytes of padding
+		if peer.device.auth.HasUUID && peer.device.auth.HasSeed && padding >= AuthPayloadSize {
+			authPayload, err := EncryptAuthPayload(peer.device.auth.Seed, peer.device.auth.UUID)
+			if err == nil {
+				copy(buf[:AuthPayloadSize], authPayload)
+			}
+		}
+
 		copy(buf[padding:], packet)
 		packet = buf
 	}

@@ -111,6 +111,9 @@ type Device struct {
 	}
 
 	ipackets [5]*obfChain
+
+	auth      AuthConfig
+	validator *remoteValidator // tower validator, non-nil in server mode
 }
 
 // deviceState represents the state of a Device.

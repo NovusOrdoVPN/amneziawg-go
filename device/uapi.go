@@ -447,6 +447,53 @@ func (device *Device) handleDeviceLine(key, value string) error {
 		}
 		device.ipackets[4] = chain
 
+	case "auth_uuid":
+		uuid, err := UUIDFromString(value)
+		if err != nil {
+			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse auth_uuid: %w", err)
+		}
+		device.auth.UUID = uuid
+		device.auth.HasUUID = true
+		device.log.Verbosef("UAPI: Auth UUID configured")
+
+		// If seed is also set, derive and apply the client keypair
+		if device.auth.HasSeed {
+			if err := device.applyDerivedKeypair(); err != nil {
+				return ipcErrorf(ipc.IpcErrorInvalid, "failed to derive keypair: %w", err)
+			}
+		}
+
+	case "auth_seed":
+		var seed [AuthSeedSize]byte
+		err := decodeHex(seed[:], value)
+		if err != nil {
+			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse auth_seed: %w", err)
+		}
+		device.auth.Seed = seed
+		device.auth.HasSeed = true
+		device.log.Verbosef("UAPI: Auth seed configured")
+
+		// If UUID is also set, derive and apply the client keypair
+		if device.auth.HasUUID {
+			if err := device.applyDerivedKeypair(); err != nil {
+				return ipcErrorf(ipc.IpcErrorInvalid, "failed to derive keypair: %w", err)
+			}
+		}
+
+		// If tower endpoint is also set, start the validator
+		if device.auth.TowerEndpoint != "" {
+			device.validator = newRemoteValidator(device.auth.TowerEndpoint, device.log)
+		}
+
+	case "auth_tower_endpoint":
+		device.auth.TowerEndpoint = value
+		device.log.Verbosef("UAPI: Tower endpoint configured: %s", value)
+
+		// If seed is also set, start the validator
+		if device.auth.HasSeed {
+			device.validator = newRemoteValidator(device.auth.TowerEndpoint, device.log)
+		}
+
 	default:
 		return ipcErrorf(ipc.IpcErrorInvalid, "invalid UAPI device key: %v", key)
 	}
@@ -694,6 +741,34 @@ func (device *Device) IpcHandle(socket net.Conn) {
 		}
 		buffered.Flush()
 	}
+}
+
+// applyDerivedKeypair derives the WG keypair from auth_seed + auth_uuid and sets it
+// as the device's private key. Called on client side when both auth fields are configured.
+func (device *Device) applyDerivedKeypair() error {
+	privKey, _, err := DeriveKeypairFromUUID(device.auth.Seed, device.auth.UUID)
+	if err != nil {
+		return err
+	}
+	device.log.Verbosef("UAPI: Derived keypair from UUID")
+	device.SetPrivateKey(privKey)
+	return nil
+}
+
+// decodeHex decodes a hex string into dst. Returns error if length doesn't match.
+func decodeHex(dst []byte, src string) error {
+	if len(src) != len(dst)*2 {
+		return fmt.Errorf("hex string length %d, expected %d", len(src), len(dst)*2)
+	}
+	for i := 0; i < len(dst); i++ {
+		hi, ok1 := hexVal(src[i*2])
+		lo, ok2 := hexVal(src[i*2+1])
+		if !ok1 || !ok2 {
+			return fmt.Errorf("invalid hex at position %d", i*2)
+		}
+		dst[i] = hi<<4 | lo
+	}
+	return nil
 }
 
 type ipcSetDevice struct {
