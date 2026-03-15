@@ -147,6 +147,20 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
 			}
 		}
 
+		// serialize auth config
+		if device.auth.HasSeed {
+			buf.WriteString("auth_seed=")
+			const hex = "0123456789abcdef"
+			for _, b := range device.auth.Seed {
+				buf.WriteByte(hex[b>>4])
+				buf.WriteByte(hex[b&0xf])
+			}
+			buf.WriteByte('\n')
+		}
+		if device.auth.TowerEndpoint != "" {
+			sendf("auth_tower_endpoint=%s", device.auth.TowerEndpoint)
+		}
+
 		for _, peer := range device.peers.keyMap {
 			// Serialize peer state.
 			peer.handshake.mutex.RLock()
