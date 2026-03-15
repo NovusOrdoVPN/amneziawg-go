@@ -139,6 +139,16 @@ func (device *Device) RoutineReceiveIncoming(
 			// check size of packet
 			packet := bufsArrs[i][:size]
 
+			// Client-side: check for auth error packets before normal type detection.
+			// Auth errors use a magic prefix and AEAD, bypassing the padding/header system.
+			if device.auth.HasSeed && device.authErrorCallback != nil {
+				if code, msg, ok := TryDecryptAuthError(device.auth.Seed, packet); ok {
+					device.log.Verbosef("Auth: received auth error from server: code=%d msg=%s", code, msg)
+					device.authErrorCallback(code, msg)
+					continue
+				}
+			}
+
 			// get message padding and type based on information from S1-S4 and H1-H4
 			msgType, padding := device.DeterminePacketTypeAndPadding(packet, MessageUnknownType)
 
@@ -151,8 +161,12 @@ func (device *Device) RoutineReceiveIncoming(
 					continue
 				}
 
-				if !device.validator.Validate(uuid) {
-					device.log.Verbosef("Auth: tower denied UUID %s from %s", UUIDToString(uuid), endpoints[i].DstToString())
+				result := device.validator.Validate(uuid)
+				if !result.Allowed {
+					device.log.Verbosef("Auth: tower denied UUID %s from %s (code=%d, msg=%s)",
+						UUIDToString(uuid), endpoints[i].DstToString(), result.ErrorCode, result.ErrorMessage)
+					// Send auth error back to client so they know why they were rejected
+					device.SendAuthError(endpoints[i], result.ErrorCode, result.ErrorMessage)
 					continue
 				}
 

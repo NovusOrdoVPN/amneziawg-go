@@ -34,12 +34,14 @@ type cachedDecision struct {
 	nextTouchAt   time.Time // when to re-touch tower to keep device lock alive
 
 	// If denied:
-	denyUntil time.Time
+	denyUntil    time.Time
+	errorCode    int
+	errorMessage string
 }
 
 type inflightCall struct {
-	wg      sync.WaitGroup
-	allowed bool
+	wg     sync.WaitGroup
+	result ValidationResult
 }
 
 type towerRequest struct {
@@ -69,9 +71,16 @@ func newRemoteValidator(endpoint string, log *Logger) *remoteValidator {
 	return rv
 }
 
+// ValidationResult holds the outcome of a UUID validation, including error details for denials.
+type ValidationResult struct {
+	Allowed      bool
+	ErrorCode    int
+	ErrorMessage string
+}
+
 // Validate checks whether a UUID is allowed to connect.
-// Returns true if the connection should be accepted.
-func (rv *remoteValidator) Validate(uuid [UUIDBinarySize]byte) bool {
+// Returns a ValidationResult with error details if denied.
+func (rv *remoteValidator) Validate(uuid [UUIDBinarySize]byte) ValidationResult {
 	key := UUIDToString(uuid)
 	now := time.Now()
 
@@ -84,12 +93,12 @@ func (rv *remoteValidator) Validate(uuid [UUIDBinarySize]byte) bool {
 				if now.After(cd.nextTouchAt) {
 					go rv.touchTower(key, cd)
 				}
-				return true
+				return ValidationResult{Allowed: true}
 			}
 			// Expired — fall through to re-validate
 		} else {
 			if now.Before(cd.denyUntil) {
-				return false
+				return ValidationResult{Allowed: false, ErrorCode: cd.errorCode, ErrorMessage: cd.errorMessage}
 			}
 			// Expired deny — fall through to re-validate
 		}
@@ -99,12 +108,12 @@ func (rv *remoteValidator) Validate(uuid [UUIDBinarySize]byte) bool {
 	return rv.callTower(key)
 }
 
-func (rv *remoteValidator) callTower(key string) bool {
+func (rv *remoteValidator) callTower(key string) ValidationResult {
 	rv.inflightMu.Lock()
 	if call, ok := rv.inflight[key]; ok {
 		rv.inflightMu.Unlock()
 		call.wg.Wait()
-		return call.allowed
+		return call.result
 	}
 	call := &inflightCall{}
 	call.wg.Add(1)
@@ -122,18 +131,20 @@ func (rv *remoteValidator) callTower(key string) bool {
 	if err != nil {
 		rv.log.Errorf("Tower request failed for %s: %v", key, err)
 		// Conservative: deny on error, short cache
-		call.allowed = false
+		call.result = ValidationResult{Allowed: false, ErrorCode: 0, ErrorMessage: "Server temporarily unavailable"}
 		rv.cache.Store(key, &cachedDecision{
-			allowed:   false,
-			denyUntil: time.Now().Add(10 * time.Second),
+			allowed:      false,
+			denyUntil:    time.Now().Add(10 * time.Second),
+			errorCode:    0,
+			errorMessage: "Server temporarily unavailable",
 		})
-		return false
+		return call.result
 	}
 
 	now := time.Now()
 	if resp.Status == 0 {
 		// Allowed
-		call.allowed = true
+		call.result = ValidationResult{Allowed: true}
 		decisionTTL := clampDuration(time.Duration(resp.DecisionTTLSec)*time.Second, 30*time.Second, 6*time.Hour)
 		heartbeat := clampDuration(time.Duration(resp.HeartbeatSec)*time.Second, 5*time.Second, 1*time.Hour)
 
@@ -143,19 +154,25 @@ func (rv *remoteValidator) callTower(key string) bool {
 			nextTouchAt:   now.Add(heartbeat),
 		})
 		rv.log.Verbosef("Tower: %s ALLOWED (ttl=%v, heartbeat=%v)", key, decisionTTL, heartbeat)
-		return true
+		return call.result
 	}
 
 	// Denied
-	call.allowed = false
+	call.result = ValidationResult{
+		Allowed:      false,
+		ErrorCode:    resp.ErrorCode,
+		ErrorMessage: resp.ErrorMessage,
+	}
 	denyTTL := clampDuration(time.Duration(resp.TTLSec)*time.Second, 5*time.Second, 5*time.Minute)
 
 	rv.cache.Store(key, &cachedDecision{
-		allowed:   false,
-		denyUntil: now.Add(denyTTL),
+		allowed:      false,
+		denyUntil:    now.Add(denyTTL),
+		errorCode:    resp.ErrorCode,
+		errorMessage: resp.ErrorMessage,
 	})
 	rv.log.Verbosef("Tower: %s DENIED (code=%d, msg=%s, cache=%v)", key, resp.ErrorCode, resp.ErrorMessage, denyTTL)
-	return false
+	return call.result
 }
 
 func (rv *remoteValidator) touchTower(key string, cd *cachedDecision) {

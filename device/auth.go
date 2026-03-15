@@ -200,6 +200,92 @@ func TunnelIPFromUUID(uuid [UUIDBinarySize]byte) [4]byte {
 	return [4]byte{10, h[0] | 0x80, h[1], h[2]}
 }
 
+// AuthErrorCallback is called on the client when the server sends an auth error.
+type AuthErrorCallback func(code int, message string)
+
+// AuthErrorMagic is a 4-byte prefix identifying auth error packets.
+// "AWE\x01" = AWG Error v1
+var AuthErrorMagic = [4]byte{0x41, 0x57, 0x45, 0x01}
+
+// AuthErrorMinSize is the minimum packet size for an auth error:
+// magic(4) + nonce(24) + code(2) + tag(16) = 46
+const AuthErrorMinSize = 4 + chacha20poly1305.NonceSizeX + 2 + chacha20poly1305.Overhead
+
+// authErrorKeyFromSeed derives a separate key for encrypting auth error messages.
+func authErrorKeyFromSeed(seed [AuthSeedSize]byte) [32]byte {
+	return sha256.Sum256(append([]byte("awg-auth-err-v1-"), seed[:]...))
+}
+
+// BuildAuthErrorPacket creates a complete auth error packet ready to send.
+// Format: [magic:4][nonce:24][encrypted(code:2 + msg:utf8) + tag:16]
+func BuildAuthErrorPacket(seed [AuthSeedSize]byte, code int, message string) ([]byte, error) {
+	key := authErrorKeyFromSeed(seed)
+
+	aead, err := chacha20poly1305.NewX(key[:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to create XChaCha20-Poly1305: %w", err)
+	}
+
+	// Build plaintext: [code:2][message:utf8]
+	msg := []byte(message)
+	if len(msg) > 512 {
+		msg = msg[:512]
+	}
+	plaintext := make([]byte, 2+len(msg))
+	binary.BigEndian.PutUint16(plaintext[:2], uint16(code))
+	copy(plaintext[2:], msg)
+
+	nonce := make([]byte, chacha20poly1305.NonceSizeX)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	ciphertext := aead.Seal(nil, nonce, plaintext, nil)
+
+	packet := make([]byte, 0, 4+chacha20poly1305.NonceSizeX+len(ciphertext))
+	packet = append(packet, AuthErrorMagic[:]...)
+	packet = append(packet, nonce...)
+	packet = append(packet, ciphertext...)
+	return packet, nil
+}
+
+// TryDecryptAuthError checks if a packet is an auth error and decrypts it.
+// Returns (code, message, true) if valid, or (0, "", false) if not an auth error.
+func TryDecryptAuthError(seed [AuthSeedSize]byte, packet []byte) (int, string, bool) {
+	if len(packet) < AuthErrorMinSize {
+		return 0, "", false
+	}
+
+	// Check magic prefix
+	if packet[0] != AuthErrorMagic[0] || packet[1] != AuthErrorMagic[1] ||
+		packet[2] != AuthErrorMagic[2] || packet[3] != AuthErrorMagic[3] {
+		return 0, "", false
+	}
+
+	key := authErrorKeyFromSeed(seed)
+
+	aead, err := chacha20poly1305.NewX(key[:])
+	if err != nil {
+		return 0, "", false
+	}
+
+	nonce := packet[4 : 4+chacha20poly1305.NonceSizeX]
+	ciphertext := packet[4+chacha20poly1305.NonceSizeX:]
+
+	plaintext, err := aead.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return 0, "", false
+	}
+
+	if len(plaintext) < 2 {
+		return 0, "", false
+	}
+
+	code := int(binary.BigEndian.Uint16(plaintext[:2]))
+	msg := string(plaintext[2:])
+	return code, msg, true
+}
+
 func hexVal(c byte) (byte, bool) {
 	switch {
 	case c >= '0' && c <= '9':

@@ -112,8 +112,9 @@ type Device struct {
 
 	ipackets [5]*obfChain
 
-	auth      AuthConfig
-	validator *remoteValidator // tower validator, non-nil in server mode
+	auth              AuthConfig
+	validator         *remoteValidator   // tower validator, non-nil in server mode
+	authErrorCallback AuthErrorCallback  // called on client when auth error received
 }
 
 // deviceState represents the state of a Device.
@@ -367,6 +368,37 @@ func (device *Device) BatchSize() int {
 		size = dSize
 	}
 	return size
+}
+
+// SetAuthErrorCallback registers a callback invoked on the client when the server
+// sends an auth error response (e.g. subscription expired, UUID revoked).
+func (device *Device) SetAuthErrorCallback(cb AuthErrorCallback) {
+	device.authErrorCallback = cb
+}
+
+// SendAuthError sends an encrypted auth error packet to a remote endpoint.
+// Used by the server to notify the client why their auth was rejected.
+func (device *Device) SendAuthError(endpoint conn.Endpoint, code int, message string) {
+	if !device.auth.HasSeed {
+		return
+	}
+
+	packet, err := BuildAuthErrorPacket(device.auth.Seed, code, message)
+	if err != nil {
+		device.log.Errorf("Failed to build auth error packet: %v", err)
+		return
+	}
+
+	device.net.RLock()
+	defer device.net.RUnlock()
+
+	if device.isClosed() {
+		return
+	}
+
+	if err := device.net.bind.Send([][]byte{packet}, endpoint); err != nil {
+		device.log.Errorf("Failed to send auth error: %v", err)
+	}
 }
 
 func (device *Device) LookupPeer(pk NoisePublicKey) *Peer {

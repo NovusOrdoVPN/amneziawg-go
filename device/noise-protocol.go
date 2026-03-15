@@ -58,6 +58,7 @@ const (
 	MessageResponseType    uint32 = 2
 	MessageCookieReplyType uint32 = 3
 	MessageTransportType   uint32 = 4
+	MessageAuthErrorType   uint32 = 5
 )
 
 const (
