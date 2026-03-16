@@ -181,6 +181,13 @@ func (peer *Peer) timersHandshakeComplete() {
 	peer.timers.handshakeAttempts.Store(0)
 	peer.timers.sentLastMinuteHandshake.Store(false)
 	peer.lastHandshakeNano.Store(time.Now().UnixNano())
+
+	// Fire auth success callback once per device lifetime (first successful handshake).
+	if cb := peer.device.authSuccessCallback; cb != nil {
+		if peer.device.authSuccessFired.CompareAndSwap(false, true) {
+			cb()
+		}
+	}
 }
 
 /* Should be called after an ephemeral key is created, which is before sending a handshake response or after receiving a handshake response. */

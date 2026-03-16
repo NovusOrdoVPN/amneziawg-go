@@ -203,6 +203,10 @@ func TunnelIPFromUUID(uuid [UUIDBinarySize]byte) [4]byte {
 // AuthErrorCallback is called on the client when the server sends an auth error.
 type AuthErrorCallback func(code int, message string)
 
+// AuthSuccessCallback is called on the client when the WireGuard handshake
+// completes, meaning the server accepted the auth (tower validated the UUID).
+type AuthSuccessCallback func()
+
 // AuthErrorMagic is a 4-byte prefix identifying auth error packets.
 // "AWE\x01" = AWG Error v1
 var AuthErrorMagic = [4]byte{0x41, 0x57, 0x45, 0x01}

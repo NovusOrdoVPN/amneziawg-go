@@ -114,7 +114,9 @@ type Device struct {
 
 	auth              AuthConfig
 	validator         *remoteValidator   // tower validator, non-nil in server mode
-	authErrorCallback AuthErrorCallback  // called on client when auth error received
+	authErrorCallback   AuthErrorCallback   // called on client when auth error received
+	authSuccessCallback AuthSuccessCallback // called on client when handshake completes (auth passed)
+	authSuccessFired    atomic.Bool         // ensures success callback fires only once
 }
 
 // deviceState represents the state of a Device.
@@ -374,6 +376,13 @@ func (device *Device) BatchSize() int {
 // sends an auth error response (e.g. subscription expired, UUID revoked).
 func (device *Device) SetAuthErrorCallback(cb AuthErrorCallback) {
 	device.authErrorCallback = cb
+}
+
+// SetAuthSuccessCallback registers a callback invoked on the client when the
+// WireGuard handshake completes successfully — meaning the server accepted
+// our auth (tower validated the UUID). Called once per session.
+func (device *Device) SetAuthSuccessCallback(cb AuthSuccessCallback) {
+	device.authSuccessCallback = cb
 }
 
 // SendAuthError sends an encrypted auth error packet to a remote endpoint.
