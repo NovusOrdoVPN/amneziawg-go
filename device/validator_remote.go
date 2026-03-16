@@ -204,22 +204,31 @@ func (rv *remoteValidator) touchTower(key string, cd *cachedDecision) {
 
 func (rv *remoteValidator) doTowerRequest(uuidStr string) (*towerResponse, error) {
 	body, _ := json.Marshal(towerRequest{UUID: uuidStr})
+	rv.log.Verbosef("Tower HTTP POST %s uuid=%s body=%s", rv.endpoint, uuidStr, string(body))
+
 	req, err := http.NewRequest("POST", rv.endpoint, bytes.NewReader(body))
 	if err != nil {
+		rv.log.Errorf("Tower HTTP request creation failed: %v", err)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	start := time.Now()
 	resp, err := rv.client.Do(req)
+	elapsed := time.Since(start)
 	if err != nil {
+		rv.log.Errorf("Tower HTTP request failed after %v: %v", elapsed, err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	var tResp towerResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tResp); err != nil {
+		rv.log.Errorf("Tower HTTP response decode failed (status=%d, elapsed=%v): %v", resp.StatusCode, elapsed, err)
 		return nil, err
 	}
+	rv.log.Verbosef("Tower HTTP response (status=%d, elapsed=%v): status=%d errorCode=%d errorMessage=%q decisionTtl=%d heartbeat=%d ttl=%d",
+		resp.StatusCode, elapsed, tResp.Status, tResp.ErrorCode, tResp.ErrorMessage, tResp.DecisionTTLSec, tResp.HeartbeatSec, tResp.TTLSec)
 	return &tResp, nil
 }
 
